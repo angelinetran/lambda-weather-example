@@ -1,25 +1,77 @@
-import YQL from 'yql';
+import axios from "axios";
+import * as AWS from "aws-sdk";
 
-export const hello = (event, context, callback) => {
+const ses = new AWS.SES();
 
-  //https://api.login.yahoo.com/oauth2/request_auth?client_id=${process.env.YAHOO_API_KEY}&redirect_uri=oob&response_type=code&language=en-us
+export const weather = async (event, context, callback) => {
 
-  const query = new YQL('select * from weather.forecast where (location = 46278)');
+  const weather = await getWeather();
+  const message = `It is ${weather.description} and ${weather.temp} degrees in ${weather.city}`;
 
-  query.exec((err, data) => {
-    console.log(data.query.results.channel, 'data')
-    const location = data.query.results.channel.location;
-    const condition = data.query.results.channel.item.condition;
+  const emailMessage = {
+    subject: 'Weather Forcast',
+    text: message
+  }
 
-    console.log('The current weather in ' + location.city + ', ' + location.region + ' is ' + condition.temp + ' degrees.');
+  await email(emailMessage);
 
-    const response = {
-      statusCode: 200,
-      body: JSON.stringify({
-        message: 'The current weather in ' + location.city + ', ' + location.region + ' is ' + condition.temp + ' degrees.',
-      }),
+  const response = {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: message
+    }),
+  };
+
+  callback(null, response);
+};
+
+async function getWeather() {
+  const url = `https://api.openweathermap.org/data/2.5/weather?APPID=${process.env.OPEN_WEATHER_MAP_API_KEY}&zip=46278,us`;
+
+  const results = await axios(url);
+  const weather = results.data;
+
+  const temp = weather.main.temp;
+  const conversion = (1.8 * (temp - 273) + 32).toFixed(0);
+
+  return {
+    temp: conversion,
+    description: weather.weather[0].description,
+    city: weather.name
+  }
+}
+
+async function email(data) {
+  return new Promise( (resolve, reject) => {
+    const params = {
+      Destination: {
+        ToAddresses: [ "atran@trendyminds.com"],
+      },
+      Message: {
+        Subject: {
+          Data: data.subject,
+          Charset: 'UTF-8'
+        },
+        Body: {
+          Text: {
+            Data: data.text,
+            Charset: "UTF-8"
+          }
+        }
+      },
+      Source: "atran@trendyminds.com"
     };
 
-    callback(null, response);
+    ses.sendEmail(params, (err) => {
+      if (err) {
+        console.log("Email Error:", err);
+        reject(err);
+      }
+      resolve({
+        statusCode: 200,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ status: "success" })
+      });
+    });
   });
-};
+}
